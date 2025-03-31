@@ -4,8 +4,9 @@ import numpy as np
 import pandas
 from matplotlib import pyplot as plt
 from scipy.io import loadmat
+from scipy.linalg import inv
 
-from scipy.signal import correlate, correlation_lags, hilbert, lfilter, firwin, get_window
+from scipy.signal import hilbert, lfilter, firwin
 
 epsilon = 2.2204e-16
 
@@ -39,41 +40,41 @@ def FMD(fs: float,
     # 生成初始滤波器组
     temp_filters = np.zeros((filter_size, cut_num))
     for n in range(cut_num):
-        # window_array = get_window('hann', filter_size, fftbins=False)
-        # window_array = matlab_hanning(filter_size)
         # 使用 firwin 生成滤波器系数，numtaps 设置为 filter_size
+        # matlab: w = window(@hanning,FilterSize); 计算长度为N+2 的汉宁窗，最后输出窗函数不包含 前后的0点，长度依然为N
+        # 需要自定义窗口值 参考函数： fmd.matlab_hanning
         cutoff = [freq_bound[n] + epsilon, freq_bound[n] + 1 / cut_num - epsilon]
-        temp_filters[:, n] = firwin(
-            filter_size,
+        w_a = firwin(
+            filter_size + 2,
             cutoff,
-            window='hann',
-            # window=tuple(window_array.tolist()),
+            window="hann",
             pass_zero=False
         )
+        temp_filters[:, n] = w_a[1:-1]
 
     # 初始化结果存储结构
     result: list[dict] = [{} for _ in range(cut_num + 1)]
     result[0] = {
-        'IterCount': None,
-        'Iterations': None,
-        'CorrMatrix': None,
-        'ComparedModeNum': None,
-        'StopNum': None
+        "IterCount": None,
+        "Iterations": None,
+        "CorrMatrix": None,
+        "ComparedModeNum": None,
+        "StopNum": None
     }
 
     # 初始化临时信号
     temp_sig = np.tile(x, (cut_num, 1)).T
 
-    itercount = 1
+    iter_count = 1
     while True:
         # 确定迭代次数
-        iternum = max_iter_num - (cut_num - mode_num) * 2 if itercount == 1 else 2
+        iter_num = max_iter_num - (cut_num - mode_num) * 2 if iter_count == 1 else 2
 
         current_iter: dict[str, list] = {
-            'Iterations': [[] for _ in range(cut_num)],
-            'CorrMatrix': None,
-            'ComparedModeNum': None,
-            'StopNum': None
+            "Iterations": [[] for _ in range(cut_num)],
+            "CorrMatrix": None,
+            "ComparedModeNum": None,
+            "StopNum": None
         }
 
         # 对每个频带执行MCKD
@@ -83,27 +84,27 @@ def FMD(fs: float,
                 fs=fs,
                 x=temp_sig[:, n],
                 f_init=f_init,
-                termIter=iternum,
+                termIter=iter_num,
                 T=None,
                 M=1,
                 plotMode=False
             )
 
             # 存储迭代结果
-            current_iter['Iterations'][n] = {
-                'y': y_Iter[:, -1],
-                'f': f_Iter[:, -1],
-                'k': k_Iter[-1],
-                'fft': np.abs(np.fft.fft(f_Iter, axis=0))[:filter_size // 2, :],
-                'freq': (np.argmax(np.abs(np.fft.fft(f_Iter, axis=0))[:filter_size // 2, :], axis=0) - 1) * (
+            current_iter["Iterations"][n] = {
+                "y": y_Iter[:, -1],
+                "f": f_Iter[:, -1],
+                "k": k_Iter[-1],
+                "fft": np.abs(np.fft.fft(f_Iter, axis=0))[:filter_size // 2, :],
+                "freq": (np.argmax(np.abs(np.fft.fft(f_Iter, axis=0))[:filter_size // 2, :], axis=0) - 1) * (
                         fs / filter_size),
-                'T': T_Iter
+                "T": T_Iter
             }
 
         # 更新信号和滤波器
         for n in range(cut_num):
-            temp_sig[:, n] = current_iter['Iterations'][n]['y']
-            temp_filters[:, n] = current_iter['Iterations'][n]['f']
+            temp_sig[:, n] = current_iter["Iterations"][n]["y"]
+            temp_filters[:, n] = current_iter["Iterations"][n]["f"]
 
         # 计算相关系数矩阵
         corr_matrix = np.abs(np.corrcoef(temp_sig, rowvar=False))
@@ -115,10 +116,10 @@ def FMD(fs: float,
         # 计算CK值
         XI = temp_sig[:, I] - np.mean(temp_sig[:, I])
         XJ = temp_sig[:, J] - np.mean(temp_sig[:, J])
-        T_I = current_iter['Iterations'][I]['T']
-        T_J = current_iter['Iterations'][J]['T']
-        KI = CK(XI, T_I, M=1)
-        KJ = CK(XJ, T_J, M=1)
+        T_I = current_iter["Iterations"][I]["T"]
+        T_J = current_iter["Iterations"][J]["T"]
+        KI = CK(XI, T_I, m_a=1)
+        KJ = CK(XJ, T_J, m_a=1)
 
         # 确定删除的索引
         delete_idx = J if KI > KJ else I
@@ -129,24 +130,24 @@ def FMD(fs: float,
         cut_num -= 1
 
         # 存储迭代信息
-        result[itercount] = {
-            'IterCount': itercount,
-            'Iterations': current_iter['Iterations'],
-            'CorrMatrix': corr_matrix,
-            'ComparedModeNum': (I, J),
-            'StopNum': delete_idx
+        result[iter_count] = {
+            "IterCount": iter_count,
+            "Iterations": current_iter["Iterations"],
+            "CorrMatrix": corr_matrix,
+            "ComparedModeNum": (I, J),
+            "StopNum": delete_idx
         }
 
         # 终止条件
         if temp_sig.shape[1] == mode_num - 1:
             break
 
-        itercount += 1
+        iter_count += 1
 
     # 提取最终模式
     Final_Mode = np.zeros((N, mode_num))
     for nn in range(mode_num):
-        Final_Mode[:, nn] = result[itercount]['Iterations'][nn]['y']
+        Final_Mode[:, nn] = result[iter_count]["Iterations"][nn]["y"]
 
     return Final_Mode
 
@@ -179,48 +180,44 @@ def xxc_mckd(fs: float,
     x = np.asarray(x).flatten()
     L = len(f_init)
     N = len(x)
-    f = f_init.reshape(-1, 1)  # 转换为列向量
 
     # 自动计算初始周期
     if T is None:
         x_env = np.abs(hilbert(x)) - np.mean(np.abs(hilbert(x)))
         T = TT(x_env, fs)
     T = int(round(T))
+
+    # 预分配XmT矩阵
+    XmT = np.zeros((L, N, M + 1))
+    for m in range(M + 1):
+        for l in range(L):
+            if l == 0:
+                start = m * T
+                XmT[l, start:, m] = x[:N - start]
+            else:
+                XmT[l, 1:, m] = XmT[l - 1, :-1, m]
+
+    Xinv = inv(XmT[:, :, 0] @ XmT[:, :, 0].T)
+
+    f = f_init.copy()
+    ck_best = 0
+    ckIter = []
     T_final = T
-
-    # 预分配三维矩阵 (优化内存布局)
-    XmT = np.zeros((L, N, M + 1), order='F')
-
-    # 初始化输出存储
-    y_final = np.zeros((N, termIter))
     f_final = np.zeros((L, termIter))
-    ckIter = np.zeros(termIter)
+    y_final = np.zeros((N, termIter))
 
-    # 主迭代循环
     for n in range(termIter):
-        # 更新XmT矩阵 (向量化加速)
-        for m in range(M + 1):
-            shift = m * T
-            # 处理第一行
-            XmT[0, shift:, m] = x[:N - shift] if shift < N else 0
-            # 滚动生成后续行
-            for l_i in range(1, L):
-                XmT[l_i, 1:, m] = XmT[l_i - 1, :-1, m]
-
-        # 矩阵逆计算 (添加正则化)
-        XTX = XmT[:, :, 0] @ XmT[:, :, 0].T
-        Xinv = np.linalg.pinv(XTX + 1e-8 * np.eye(L))
-
         # 计算输出信号
-        y = (f.T @ XmT[:, :, 0]).T
+        y = (f.T @ XmT[:, :, 0]).flatten()
 
-        # 生成时移信号矩阵yt
+        # 生成yt矩阵
+        f_final[:, n] = f.flatten()
         yt = np.zeros((N, M + 1))
-        yt[:, 0] = y.flatten()
+        yt[:, 0] = y
         for m in range(1, M + 1):
-            yt[m * T:, m] = y[:-m * T].flatten() if m * T < N else 0
+            yt[T:, m] = y[:-T]
 
-        # 计算alpha矩阵 (向量化实现)
+        # 计算alpha
         alpha = np.zeros((N, M + 1))
         for m in range(M + 1):
             cols = [k for k in range(M + 1) if k != m]
@@ -229,27 +226,46 @@ def xxc_mckd(fs: float,
         # 计算beta
         beta = np.prod(yt, axis=1)
 
+        # 计算Xalpha
+        Xalpha = np.zeros(L)
+        for m in range(M + 1):
+            Xalpha += XmT[:, :, m] @ alpha[:, m]
+
         # 更新滤波器系数
-        Xalpha = np.sum([XmT[:, :, m] @ alpha[:, m] for m in range(M + 1)], axis=0)
         numerator = np.sum(y ** 2)
-        denominator = 2 * np.sum(beta ** 2) + 1e-12
-        f = (numerator / denominator) * (Xinv @ Xalpha)
-        f /= np.linalg.norm(f)  # 归一化
+        denominator = 2 * np.sum(beta ** 2)
+        f = (numerator / denominator) * Xinv @ Xalpha.reshape(-1, 1)
+        f /= np.sqrt(np.sum(f ** 2))
 
-        # 记录当前迭代结果
-        ckIter[n] = np.sum(beta ** 2) / (np.sum(y ** 2) ** (M + 1) + 1e-12)
-        f_final[:, n] = f.flatten()
-        y_final[:, n] = lfilter(f.flatten(), [1.0], x)
+        # 计算CK值
+        ck = np.sum(beta ** 2) / (np.sum(y ** 2) ** (M + 1))
+        ckIter.append(ck)
+        if ck > ck_best:
+            ck_best = ck
 
-        # 动态更新周期估计
-        if n % 5 == 4:
-            y_env = np.abs(hilbert(y)) - np.mean(np.abs(hilbert(y)))
-            T_new = TT(y_env, fs)
-            if 10 < T_new < N // 2:
-                T = int(round(T_new))
-                T_final = T
+        # 更新周期T
+        xyenvelope = np.abs(hilbert(y)) - np.mean(np.abs(hilbert(y)))
+        T = TT(xyenvelope, fs)
+        T = int(round(T))
+        T_final = T
 
-    return y_final, f_final, ckIter, T_final
+        # 重新计算XmT
+        XmT = np.zeros((L, N, M + 1))
+        for m in range(M + 1):
+            for l in range(L):
+                if l == 0:
+                    start = m * T
+                    XmT[l, start:, m] = x[:N - start]
+                else:
+                    XmT[l, 1:, m] = XmT[l - 1, :-1, m]
+
+        Xinv = inv(XmT[:, :, 0] @ XmT[:, :, 0].T)
+
+        # 存储结果
+        # TODO 这一步之前都是正确的
+        y_final[:, n] = lfilter(f_final.flatten(), 1, x)
+
+    return y_final, f_final, np.array(ckIter), T_final
 
 
 def TT(y, fs):
@@ -262,50 +278,54 @@ def TT(y, fs):
     返回:
         T : 估计的周期 (样本数)
     """
-    y = np.asarray(y).flatten()
-    if len(y) < 2:
-        return 0  # 无效输入处理
+    M = fs
+    n = len(y)
+    max_lag = n - 1
+    M = min(M, max_lag)  # 确保M不超过最大可能滞后
 
-    # 计算最大滞后量（不超过信号长度）
-    max_lag = min(fs, len(y) - 1)
+    # 计算自相关
+    autocorr = np.correlate(y, y, mode='full')
 
-    # 计算归一化自相关
-    acf = correlate(y, y, mode='full')
-    norm = np.dot(y, y)
-    acf_normalized = acf / norm if norm != 0 else acf
+    # 确定中间索引
+    middle = n - 1
+    start = middle - M
+    end = middle + M + 1
 
-    # 获取滞后值数组
-    lags = correlation_lags(len(y), len(y), mode='full')
+    # 提取从滞后-M到M的部分
+    NA = autocorr[start:end]
 
-    # 提取非负滞后部分 (0到max_lag)
-    mask = (lags >= 0) & (lags <= max_lag)
-    valid_lags = lags[mask]
-    valid_acf = acf_normalized[mask]
+    # 归一化到零滞后的自相关值
+    NA = NA / autocorr[middle]
+    NA = np.insert(NA, 0, 0)
+    NA = np.append(NA, 0)
+    mid = np.ceil(len(NA) / 2)
+    NA = NA[int(mid) - 1:]
 
     # 寻找第一个过零点
-    zero_cross = None
-    for i in range(1, len(valid_acf)):
-        prev = valid_acf[i - 1]
-        curr = valid_acf[i]
-        if (prev > 0 > curr) or (prev == 0 or curr == 0):
-            zero_cross = i
+    sample1 = NA[0]
+    zeroposi = None
+    for lag in range(1, len(NA)):
+        sample2 = NA[lag]
+
+        if sample1 > 0 > sample2:
+            zeroposi = lag
             break
+        elif sample1 == 0 or sample2 == 0:
+            zeroposi = lag
+            break
+        else:
+            sample1 = sample2
 
-    if zero_cross is None:
-        return 0
+    NA = NA[zeroposi:]
+    max_position = np.argmax(NA)
 
-    # 提取过零点后的自相关段
-    final_lags = valid_lags[zero_cross:]
-    final_acf = valid_acf[zero_cross:]
+    # zeroposi，max_position对应的是索引值，matlab的索引值是从1开始的
+    T = zeroposi + 1 + max_position + 1
 
-    # 找到最大峰值的滞后值
-    peak_pos = np.argmax(final_acf)
-    T = final_lags[peak_pos]
-
-    return int(T)
+    return T
 
 
-def CK(x, T, M=2):
+def CK(x, t_a, m_a=2):
     """计算相关峰度 (Correlated Kurtosis)
 
     参数:
@@ -321,28 +341,28 @@ def CK(x, T, M=2):
     N = len(x)
 
     # 初始化时移矩阵 (M+1行, N列)
-    x_shift = np.zeros((M + 1, N))
+    x_shift = np.zeros((m_a + 1, N))
     x_shift[0, :] = x
 
     # 逐行填充时移信号
-    for m in range(1, M + 1):
+    for m in range(1, m_a + 1):
         # 从第T位置开始填充左移后的信号 (MATLAB索引转换为Python索引)
-        x_shift[m, T:] = x_shift[m - 1, :-T]
+        x_shift[m, t_a:] = x_shift[m - 1, :-t_a]
 
     # 计算分子：时移信号逐点乘积的平方和
     numerator = np.sum(np.prod(x_shift, axis=0) ** 2)
 
     # 计算分母：原始信号能量的(M+1)次方
-    denominator = np.sum(x ** 2) ** (M + 1)
+    denominator = np.sum(x ** 2) ** (m_a + 1)
 
     return numerator / denominator
 
 
-def max_ij(X):
+def max_ij(x):
     """返回矩阵X中最大值的行索引、列索引和最大值"""
     # 按列找最大值及其行索引
-    col_max_values = np.max(X, axis=0)
-    row_indices = np.argmax(X, axis=0)
+    col_max_values = np.max(x, axis=0)
+    row_indices = np.argmax(x, axis=0)
 
     # 找全局最大值及其列索引
     max_value = np.max(col_max_values)
@@ -354,7 +374,7 @@ def max_ij(X):
     return i, j, max_value
 
 
-def matlab_hanning(filter_size: int) -> np.ndarray:
+def matlab_hanning(filter_size: int) -> list[float]:
     """
     生成与 MATLAB 完全一致的汉宁窗（首尾为 0）
 
@@ -365,16 +385,12 @@ def matlab_hanning(filter_size: int) -> np.ndarray:
         np.ndarray: 窗口数组
     """
     # 生成从 0 到 N-1 的索引
-    n = np.arange(filter_size)
+    N = filter_size + 2
+    n = np.arange(N)
 
     # MATLAB 的 hanning 公式
-    window = 0.5 * (1 - np.cos(2 * np.pi * n / (filter_size)))
-    #
-    # # 强制首尾为 0 (MATLAB 的特殊处理)
-    # window[0] = 0.0
-    # window[-1] = 0.0
-
-    return window
+    window = 0.5 * (1 - np.cos(2 * np.pi * n / (N - 1)))
+    return window[1:-1].tolist()
 
 
 def main():
@@ -390,18 +406,18 @@ def main():
     imfs = FMD(fs, data.values, filter_size, cut_num, mod_num, max_iter_num)
 
     matlab_data = loadmat(r"data/matlab_result.mat")
-    matlab_modes = matlab_data['u']
+    matlab_modes = matlab_data["u"]
 
     plt.figure(figsize=(12, 6))
     for i in range(imfs.shape[1]):
         plt.subplot(imfs.shape[1], 1, i + 1)
-        plt.plot(matlab_modes[:, i], 'r--', label='MATLAB')
-        plt.plot(imfs[:, i], 'b-', alpha=0.5, label='Python')
-        plt.title(f'Mode {i + 1}')
+        plt.plot(matlab_modes[:, i], "r--", label="MATLAB")
+        plt.plot(imfs[:, i], "b-", alpha=0.5, label="Python")
+        plt.title(f"Mode {i + 1}")
         plt.legend()
     plt.tight_layout()
     plt.show()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
