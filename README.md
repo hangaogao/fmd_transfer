@@ -1,6 +1,6 @@
 
 
-## Implementation of Feature Mod Decomposition
+## Implementation of Feature Mode Decomposition
 
 
 
