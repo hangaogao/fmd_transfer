@@ -30,7 +30,6 @@ def FMD(fs: float,
     返回:
         Final_Mode: 分解后的模式矩阵 (每列为一个模式)
     """
-    # 输入信号处理
     x = np.asarray(x).flatten()
     N = len(x)
 
@@ -84,10 +83,10 @@ def FMD(fs: float,
                 fs=fs,
                 x=temp_sig[:, n],
                 f_init=f_init,
-                termIter=iter_num,
-                T=None,
-                M=1,
-                plotMode=False
+                term_iter=iter_num,
+                initial_t=None,
+                initial_m=1,
+                plot_mode=False
             )
 
             # 存储迭代结果
@@ -138,7 +137,6 @@ def FMD(fs: float,
             "StopNum": delete_idx
         }
 
-        # 终止条件
         if temp_sig.shape[1] == mode_num - 1:
             break
 
@@ -155,10 +153,10 @@ def FMD(fs: float,
 def xxc_mckd(fs: float,
              x: np.ndarray,
              f_init: np.ndarray,
-             termIter: int = 30,
-             T: int = None,
-             M: int = 3,
-             plotMode: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+             term_iter: int = 30,
+             initial_t: int = None,
+             initial_m: int = 3,
+             plot_mode: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int]:
     """改进的最大相关峰度解卷积 (MCKD) 算法
 
     参数:
@@ -173,8 +171,8 @@ def xxc_mckd(fs: float,
     返回:
         y_final: 各迭代输出信号 (2D数组，每列为一次迭代)
         f_final: 各迭代滤波器系数 (2D数组，每列为一次迭代)
-        ckIter: 各迭代相关峰度值 (1D数组)
-        T_final: 最终估计周期
+        ck_iter: 各迭代相关峰度值 (1D数组)
+        t_final: 最终估计周期
     """
     # 输入校验
     x = np.asarray(x).flatten()
@@ -182,45 +180,45 @@ def xxc_mckd(fs: float,
     N = len(x)
 
     # 自动计算初始周期
-    if T is None:
+    if initial_t is None:
         x_env = np.abs(hilbert(x)) - np.mean(np.abs(hilbert(x)))
-        T = TT(x_env, fs)
-    T = int(round(T))
+        initial_t = TT(x_env, fs)
+    initial_t = int(round(initial_t))
 
     # 预分配XmT矩阵
-    XmT = np.zeros((L, N, M + 1))
-    for m in range(M + 1):
-        for l in range(L):
-            if l == 0:
-                start = m * T
-                XmT[l, start:, m] = x[:N - start]
+    XmT = np.zeros((L, N, initial_m + 1))
+    for m in range(initial_m + 1):
+        for i in range(L):
+            if i == 0:
+                start = m * initial_t
+                XmT[i, start:, m] = x[:N - start]
             else:
-                XmT[l, 1:, m] = XmT[l - 1, :-1, m]
+                XmT[i, 1:, m] = XmT[i - 1, :-1, m]
 
     Xinv = inv(XmT[:, :, 0] @ XmT[:, :, 0].T)
 
     f = f_init.copy()
     ck_best = 0
-    ckIter = []
-    T_final = T
-    f_final = np.zeros((L, termIter))
-    y_final = np.zeros((N, termIter))
+    ck_iter = []
+    t_final = initial_t
+    f_final = np.zeros((L, term_iter))
+    y_final = np.zeros((N, term_iter))
 
-    for n in range(termIter):
+    for n in range(term_iter):
         # 计算输出信号
         y = (f.T @ XmT[:, :, 0]).flatten()
 
         # 生成yt矩阵
         f_final[:, n] = f.flatten()
-        yt = np.zeros((N, M + 1))
+        yt = np.zeros((N, initial_m + 1))
         yt[:, 0] = y
-        for m in range(1, M + 1):
-            yt[T:, m] = y[:-T]
+        for m in range(1, initial_m + 1):
+            yt[initial_t:, m] = y[:-initial_t]
 
         # 计算alpha
-        alpha = np.zeros((N, M + 1))
-        for m in range(M + 1):
-            cols = [k for k in range(M + 1) if k != m]
+        alpha = np.zeros((N, initial_m + 1))
+        for m in range(initial_m + 1):
+            cols = [k for k in range(initial_m + 1) if k != m]
             alpha[:, m] = np.prod(yt[:, cols], axis=1) ** 2 * yt[:, m]
 
         # 计算beta
@@ -228,7 +226,7 @@ def xxc_mckd(fs: float,
 
         # 计算Xalpha
         Xalpha = np.zeros(L)
-        for m in range(M + 1):
+        for m in range(initial_m + 1):
             Xalpha += XmT[:, :, m] @ alpha[:, m]
 
         # 更新滤波器系数
@@ -238,34 +236,32 @@ def xxc_mckd(fs: float,
         f /= np.sqrt(np.sum(f ** 2))
 
         # 计算CK值
-        ck = np.sum(beta ** 2) / (np.sum(y ** 2) ** (M + 1))
-        ckIter.append(ck)
+        ck = np.sum(beta ** 2) / (np.sum(y ** 2) ** (initial_m + 1))
+        ck_iter.append(ck)
         if ck > ck_best:
             ck_best = ck
 
         # 更新周期T
         xyenvelope = np.abs(hilbert(y)) - np.mean(np.abs(hilbert(y)))
-        T = TT(xyenvelope, fs)
-        T = int(round(T))
-        T_final = T
+        initial_t = TT(xyenvelope, fs)
+        initial_t = int(round(initial_t))
+        t_final = initial_t
 
         # 重新计算XmT
-        XmT = np.zeros((L, N, M + 1))
-        for m in range(M + 1):
-            for l in range(L):
-                if l == 0:
-                    start = m * T
-                    XmT[l, start:, m] = x[:N - start]
+        XmT = np.zeros((L, N, initial_m + 1))
+        for m in range(initial_m + 1):
+            for j in range(L):
+                if j == 0:
+                    start = m * initial_t
+                    XmT[j, start:, m] = x[:N - start]
                 else:
-                    XmT[l, 1:, m] = XmT[l - 1, :-1, m]
+                    XmT[j, 1:, m] = XmT[j - 1, :-1, m]
 
         Xinv = inv(XmT[:, :, 0] @ XmT[:, :, 0].T)
 
-        # 存储结果
-        # TODO 这一步之前都是正确的
-        y_final[:, n] = lfilter(f_final.flatten(), 1, x)
+        y_final[:, n] = lfilter(f_final[:, n], 1, x)
 
-    return y_final, f_final, np.array(ckIter), T_final
+    return y_final, f_final, np.array(ck_iter), t_final
 
 
 def TT(y, fs):
@@ -396,6 +392,7 @@ def matlab_hanning(filter_size: int) -> list[float]:
 def main():
     np.random.seed(42)
     data = pandas.read_excel(r"data/原始信号.xlsx", header=None)
+    signal = data.values
 
     fs = len(data)
     filter_size = 30
@@ -403,7 +400,7 @@ def main():
     mod_num = 5
     max_iter_num = 20
 
-    imfs = FMD(fs, data.values, filter_size, cut_num, mod_num, max_iter_num)
+    imfs = FMD(fs, signal, filter_size, cut_num, mod_num, max_iter_num)
 
     matlab_data = loadmat(r"data/matlab_result.mat")
     matlab_modes = matlab_data["u"]
