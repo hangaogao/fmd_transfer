@@ -22,10 +22,10 @@ def FMD(fs: float,
     参数:
         fs: 采样频率 (Hz)
         x: 输入信号 (1D数组)
-        FilterSize: 滤波器长度
-        CutNum: 频带分割数
-        ModeNum: 目标模式数
-        MaxIterNum: 最大迭代次数
+        filter_size: 滤波器长度
+        cut_num: 频带分割数
+        mode_num: 目标模式数
+        max_iter_num: 最大迭代次数
 
     返回:
         Final_Mode: 分解后的模式矩阵 (每列为一个模式)
@@ -394,12 +394,13 @@ def main():
     data = pandas.read_excel(r"data/原始信号.xlsx", header=None)
     signal = data.values
 
-    fs = len(data)
+    signal = np.sin(2 * np.pi * signal) + np.cos(0.3 * np.pi * signal)
+
     filter_size = 30
     cut_num = 7
-    mod_num = 5
+    mod_num = 4
     max_iter_num = 20
-
+    fs = len(signal)
     imfs = FMD(fs, signal, filter_size, cut_num, mod_num, max_iter_num)
 
     matlab_data = loadmat(r"data/matlab_result.mat")
