@@ -20,15 +20,18 @@ def FMD(fs: float,
     """特征模式分解 (Feature Mode Decomposition)
 
     参数:
-        fs: 采样频率 (Hz)
+        fs: 采样频率 (Hz)，更高的fs更能精确定位高频成分
         x: 输入信号 (1D数组)
         filter_size: 滤波器长度
-        cut_num: 频带分割数
-        mode_num: 目标模式数
-        max_iter_num: 最大迭代次数
+        cut_num: 频带分割数，值越大，初始频带越多，可能捕获更细微的模态，但会导致计算两增大，后续合并相关模态难度增大
+        mode_num: 目标模式数，最终输出的模态数量
+        max_iter_num: 最大迭代次数，控制MCKD的最大迭代次数，值越小，模态可能为收敛
+
+    PS:
+        初始的cut_num需要大于mod_num，后续通过相关系数矩阵逐步合并
 
     返回:
-        Final_Mode: 分解后的模式矩阵 (每列为一个模式)
+        final_mode: 分解后的模式矩阵 (每列为一个模式)
     """
     x = np.asarray(x).flatten()
     N = len(x)
@@ -42,6 +45,7 @@ def FMD(fs: float,
         # 使用 firwin 生成滤波器系数，numtaps 设置为 filter_size
         # matlab: w = window(@hanning,FilterSize); 计算长度为N+2 的汉宁窗，最后输出窗函数不包含 前后的0点，长度依然为N
         # 需要自定义窗口值 参考函数： fmd.matlab_hanning
+        # 也可以将filter_size直接加2作为参数
         cutoff = [freq_bound[n] + epsilon, freq_bound[n] + 1 / cut_num - epsilon]
         w_a = firwin(
             filter_size + 2,
